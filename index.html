@@ -1,1 +1,270 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Persentasi | Byhas Studio</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{ color-scheme:light; --bg:#f3f6fa; --card:#fff; --ink:#16243b; --on-ink:#fff; --muted:#56657d; --blue:#2f5fd0; --sun:#f2b630; --line:#c9d3e2; }
+  @media(prefers-color-scheme:dark){ :root{ color-scheme:dark; --bg:#0f1724; --card:#172236; --ink:#e9eef7; --on-ink:#0f1724; --muted:#a2afc3; --blue:#8fb0f7; --line:#33455f; } }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  [hidden]{ display:none !important; }
+  body{ background:var(--bg); color:var(--ink); font-family:'Plus Jakarta Sans',sans-serif; -webkit-font-smoothing:antialiased; }
+  :focus-visible{ outline:3px solid var(--sun); outline-offset:3px; }
+  #awal{ min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:32px 20px; gap:16px; }
+  h1{ font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:clamp(2.2rem,6vw,3.4rem); }
+  .sub{ color:var(--muted); max-width:30em; }
+  .drop{ width:min(100%,520px); border:2px dashed var(--line); border-radius:20px; background:var(--card); padding:44px 24px; display:flex; flex-direction:column; align-items:center; gap:14px; transition:border-color .2s, background .2s; }
+  .drop.on{ border-color:var(--blue); }
+  .drop strong{ font-family:'Bricolage Grotesque',sans-serif; font-size:20px; }
+  .btn{ font:inherit; font-weight:700; font-size:15px; background:var(--ink); color:var(--on-ink); border:none; border-radius:10px; padding:11px 22px; cursor:pointer; }
+  .btn:hover{ background:var(--blue); color:#fff; }
+  .note{ font-size:13.5px; color:var(--muted); max-width:34em; }
+  #pesan{ min-height:22px; font-weight:600; font-size:14.5px; }
+  #pesan.err{ color:#c4455f; }
+  #viewer{ position:fixed; inset:0; background:#0c1220; display:flex; flex-direction:column; }
+  #stage{ flex:1; display:flex; align-items:center; justify-content:center; overflow:hidden; min-height:0; }
+  #wrap{ position:relative; overflow:hidden; background:#fff; box-shadow:0 20px 60px -20px rgba(0,0,0,.7); }
+  #wrap>*{ transform-origin:0 0; }
+  #prog{ position:absolute; top:0; left:0; height:4px; background:var(--sun); width:0; transition:width .25s; z-index:3; }
+  #bar{ position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:center; align-items:center; gap:10px; flex-wrap:wrap; padding:14px; background:linear-gradient(transparent,rgba(0,0,0,.65)); transition:opacity .3s; z-index:3; }
+  #bar.sembunyi{ opacity:0; pointer-events:none; }
+  #bar .btn{ background:rgba(255,255,255,.16); color:#fff; padding:9px 16px; font-size:14px; }
+  #bar .btn:hover{ background:var(--blue); }
+  #hal{ color:#fff; font-weight:600; min-width:72px; text-align:center; font-size:15px; }
+  .slide{ position:relative; overflow:hidden; }
+  .slide div,.slide table{ position:absolute; }
+  .slide p{ margin:0; }
+</style>
+</head>
+<body>
 
+<main id="awal">
+  <h1>Persentasi</h1>
+  <p class="sub">Pilih berkas presentasimu, lalu slide langsung tampil seperti di PowerPoint. Kamu bisa memutarnya satu per satu atau layar penuh.</p>
+  <label class="drop" id="drop">
+    <strong>Tarik berkas ke sini</strong>
+    <span class="note">atau</span>
+    <span class="btn" role="button" tabindex="0" id="pilih">Pilih berkas</span>
+    <input type="file" id="berkas" accept=".pptx,.pdf,image/*" multiple hidden>
+  </label>
+  <div id="pesan" role="status"></div>
+  <p class="note">Format yang didukung: PPTX, PDF, dan gambar (JPG atau PNG). Untuk berkas lama berformat .ppt, simpan ulang dulu sebagai .pptx dari PowerPoint. Berkas tidak diunggah ke mana pun, semuanya diproses di browsermu.</p>
+</main>
+
+<div id="viewer" hidden>
+  <div id="prog"></div>
+  <div id="stage"><div id="wrap"></div></div>
+  <div id="bar">
+    <button class="btn" id="prev" type="button">Sebelumnya</button>
+    <span id="hal">1 / 1</span>
+    <button class="btn" id="next" type="button">Berikutnya</button>
+    <button class="btn" id="penuh" type="button">Layar penuh</button>
+    <button class="btn" id="tutup" type="button">Ganti berkas</button>
+  </div>
+</div>
+
+<script>
+  var E=12700, JSZIP='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+      PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+      WORKER='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  var $=function(i){ return document.getElementById(i); };
+  function loadScript(u){ return new Promise(function(ok,no){ var s=document.createElement('script'); s.src=u; s.onload=ok;
+    s.onerror=function(){ no(new Error('Pustaka gagal dimuat. Periksa koneksi internetmu.')); }; document.head.appendChild(s); }); }
+  var X=function(t){ return new DOMParser().parseFromString(t,'application/xml'); };
+  var kids=function(el,n){ return Array.prototype.filter.call(el.children,function(c){ return c.nodeName===n; }); };
+  var first=function(el,n){ return el.getElementsByTagName(n)[0]; };
+  function res(dir,t){ if(t[0]==='/') return t.slice(1); var p=dir.split('/'); t.split('/').forEach(function(s){ if(s==='..') p.pop(); else p.push(s); }); return p.join('/'); }
+  async function rels(z,p){
+    var i=p.lastIndexOf('/'), dir=p.slice(0,i), f=z.file(dir+'/_rels/'+p.slice(i+1)+'.rels'), o={};
+    if(!f) return o;
+    Array.prototype.forEach.call(X(await f.async('string')).getElementsByTagName('Relationship'),function(r){
+      o[r.getAttribute('Id')]={ t:res(dir,r.getAttribute('Target')), type:r.getAttribute('Type') }; });
+    return o;
+  }
+  function terang(hex){ var n=parseInt(hex.slice(1),16); return (0.299*(n>>16)+0.587*((n>>8)&255)+0.114*(n&255))/255; }
+
+  /* ---------- PPTX ---------- */
+  async function bukaPptx(buf){
+    await loadScript(JSZIP);
+    var z=await JSZip.loadAsync(buf), pp='ppt/presentation.xml';
+    var pres=X(await z.file(pp).async('string')), sz=first(pres,'p:sldSz');
+    var W=sz.getAttribute('cx')/E, H=sz.getAttribute('cy')/E, pr=await rels(z,pp), th={};
+    var tf=z.file('ppt/theme/theme1.xml');
+    if(tf){ var td=X(await tf.async('string'));
+      ['dk1','lt1','dk2','lt2','accent1','accent2','accent3','accent4','accent5','accent6'].forEach(function(n){
+        var e=first(td,'a:'+n), c=e&&e.firstElementChild; if(c) th[n]='#'+(c.nodeName==='a:sysClr'?c.getAttribute('lastClr'):c.getAttribute('val')); }); }
+    var map={tx1:'dk1',bg1:'lt1',tx2:'dk2',bg2:'lt2'};
+    function warna(n){ var c=n&&n.firstElementChild; if(!c) return null;
+      if(c.nodeName==='a:srgbClr') return '#'+c.getAttribute('val');
+      if(c.nodeName==='a:schemeClr'){ var v=c.getAttribute('val'); return th[map[v]||v]||null; } return null; }
+    var ids=Array.prototype.map.call(pres.getElementsByTagName('p:sldId'),function(n){ return pr[n.getAttribute('r:id')].t; });
+    return ids.map(function(path){ return { w:W, h:H, build:function(){ return slide(z,path,W,H,warna); } }; });
+  }
+
+  async function slide(z,path,W,H,warna){
+    var doc=X(await z.file(path).async('string')), r=await rels(z,path);
+    function cari(rs,suf){ var k=Object.keys(rs).filter(function(i){ return rs[i].type.endsWith(suf); })[0]; return k&&rs[k].t; }
+    var lp=cari(r,'/slideLayout'), ld=lp&&X(await z.file(lp).async('string'));
+    var mp=lp&&cari(await rels(z,lp),'/slideMaster'), md=mp&&X(await z.file(mp).async('string'));
+    var bg='#ffffff';
+    [doc,ld,md].some(function(d){ if(!d) return false; var b=first(d,'p:bg'), f=b&&first(b,'a:solidFill'), c=f&&warna(f); if(c){ bg=c; return true; } return false; });
+    var teks=terang(bg)<0.5?'#ffffff':'#000000';
+    var root=document.createElement('div'); root.className='slide'; root.style.cssText='width:'+W+'px;height:'+H+'px;background:'+bg;
+
+    function kotak(el){
+      var x=kids(el,'p:xfrm')[0]; if(!x){ var s=kids(el,'p:spPr')[0]; x=s&&kids(s,'a:xfrm')[0]; }
+      if(!x){ var ph=first(el,'p:ph'); if(!ph) return null;
+        var idx=ph.getAttribute('idx'), ty=ph.getAttribute('type');
+        for(var d of [ld,md]){ if(!d) continue;
+          for(var s2 of d.getElementsByTagName('p:sp')){ var q=first(s2,'p:ph'); if(!q) continue;
+            var ok=idx!==null?q.getAttribute('idx')===idx:q.getAttribute('type')===ty;
+            var sp2=kids(s2,'p:spPr')[0], xx=ok&&sp2&&kids(sp2,'a:xfrm')[0]; if(xx){ x=xx; break; } }
+          if(x) break; } }
+      if(!x) return null;
+      var o=first(x,'a:off'), e=first(x,'a:ext'); if(!o||!e) return null;
+      return { x:o.getAttribute('x')/E, y:o.getAttribute('y')/E, w:e.getAttribute('cx')/E, h:e.getAttribute('cy')/E };
+    }
+    function pos(d,g){ d.style.left=g.x+'px'; d.style.top=g.y+'px'; d.style.width=g.w+'px'; d.style.height=g.h+'px'; }
+
+    function isiTeks(tx,d,tipe){
+      var bp=kids(tx,'a:bodyPr')[0], an=bp&&bp.getAttribute('anchor'), af=bp&&first(bp,'a:normAutofit');
+      var skala=af&&af.getAttribute('fontScale')?af.getAttribute('fontScale')/100000:1;
+      d.style.cssText+=';display:flex;flex-direction:column;padding:3.6px 7.2px;justify-content:'+(an==='ctr'?'center':an==='b'?'flex-end':'flex-start');
+      var dasar=(tipe==='title'||tipe==='ctrTitle')?40:tipe==='subTitle'?24:18;
+      kids(tx,'a:p').forEach(function(p){
+        var pd=document.createElement('p'), pp=kids(p,'a:pPr')[0], ada=false;
+        var al={l:'left',ctr:'center',r:'right',just:'justify'}[pp&&pp.getAttribute('algn')];
+        if(al) pd.style.textAlign=al; else if(tipe==='title'||tipe==='ctrTitle') pd.style.textAlign='center';
+        if(pp&&pp.getAttribute('marL')) pd.style.paddingLeft=pp.getAttribute('marL')/E+'px';
+        if(pp&&kids(pp,'a:buChar').length) pd.appendChild(document.createTextNode('\u2022 '));
+        Array.prototype.forEach.call(p.children,function(c){
+          if(c.nodeName==='a:br'){ pd.appendChild(document.createElement('br')); return; }
+          if(c.nodeName!=='a:r'&&c.nodeName!=='a:fld') return;
+          var t=first(c,'a:t'); if(!t) return; ada=true;
+          var rp=kids(c,'a:rPr')[0], sp=document.createElement('span'); sp.textContent=t.textContent;
+          var s=(rp&&rp.getAttribute('sz')?rp.getAttribute('sz')/100:dasar)*skala;
+          sp.style.fontSize=s+'px'; sp.style.lineHeight='1.2';
+          var f=rp&&kids(rp,'a:solidFill')[0];
+          sp.style.color=(f&&warna(f))||teks;
+          if(rp&&rp.getAttribute('b')==='1') sp.style.fontWeight='700';
+          if(rp&&rp.getAttribute('i')==='1') sp.style.fontStyle='italic';
+          if(rp&&rp.getAttribute('u')&&rp.getAttribute('u')!=='none') sp.style.textDecoration='underline';
+          pd.appendChild(sp); });
+        if(!ada){ var k=document.createElement('span'); k.textContent='\u200b'; k.style.fontSize=dasar*skala+'px'; pd.appendChild(k); }
+        d.appendChild(pd); });
+    }
+
+    async function gambar(el){
+      var g=kotak(el), b=first(el,'a:blip'), rid=b&&b.getAttribute('r:embed'), t=rid&&r[rid]&&r[rid].t; if(!g||!t) return;
+      var m={png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif',svg:'image/svg+xml',webp:'image/webp'}[t.split('.').pop().toLowerCase()];
+      var f=z.file(t); if(!m||!f) return;
+      var im=document.createElement('img'); im.src='data:'+m+';base64,'+await f.async('base64');
+      im.style.cssText='position:absolute;left:'+g.x+'px;top:'+g.y+'px;width:'+g.w+'px;height:'+g.h+'px';
+      root.appendChild(im);
+    }
+
+    async function gambarObjek(el){
+      var n=el.nodeName;
+      if(n==='p:grpSp'){ for(var c of el.children) await gambarObjek(c); return; }
+      if(n==='p:pic'){ await gambar(el); return; }
+      var g=kotak(el); if(!g) return;
+      if(n==='p:graphicFrame'){ var tb=first(el,'a:tbl'); if(!tb) return;
+        var t=document.createElement('table'); t.style.cssText='left:'+g.x+'px;top:'+g.y+'px;width:'+g.w+'px;border-collapse:collapse;color:'+teks;
+        kids(tb,'a:tr').forEach(function(tr){ var row=t.insertRow(); kids(tr,'a:tc').forEach(function(tc){ var td=row.insertCell();
+          td.textContent=Array.prototype.map.call(tc.getElementsByTagName('a:t'),function(x){ return x.textContent; }).join(' ');
+          td.style.cssText='border:1px solid '+teks+'55;padding:6px 8px;font-size:16px'; }); });
+        root.appendChild(t); return; }
+      if(n!=='p:sp') return;
+      var d=document.createElement('div'); pos(d,g);
+      var spr=kids(el,'p:spPr')[0], fl=spr&&kids(spr,'a:solidFill')[0], gm=spr&&first(spr,'a:prstGeom'), pt=gm&&gm.getAttribute('prst');
+      if(fl&&warna(fl)) d.style.background=warna(fl);
+      if(pt==='ellipse') d.style.borderRadius='50%'; else if(pt==='roundRect') d.style.borderRadius='14px';
+      var tx=kids(el,'p:txBody')[0], ph=first(el,'p:ph');
+      if(tx) isiTeks(tx,d,ph&&ph.getAttribute('type'));
+      root.appendChild(d);
+    }
+    var tree=first(doc,'p:spTree');
+    for(var el of tree.children) await gambarObjek(el);
+    return root;
+  }
+
+  /* ---------- PDF dan gambar ---------- */
+  async function bukaPdf(buf){
+    await loadScript(PDFJS); pdfjsLib.GlobalWorkerOptions.workerSrc=WORKER;
+    var doc=await pdfjsLib.getDocument({data:buf}).promise, p1=await doc.getPage(1), v=p1.getViewport({scale:1}), out=[];
+    for(let i=1;i<=doc.numPages;i++){
+      out.push({ w:v.width, h:v.height, build:async function(){
+        var pg=await doc.getPage(i), vp=pg.getViewport({scale:2}), c=document.createElement('canvas');
+        c.width=vp.width; c.height=vp.height; await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+        this.w=vp.width/2; this.h=vp.height/2; c.style.cssText='width:'+this.w+'px;height:'+this.h+'px;display:block'; return c; } });
+    }
+    return out;
+  }
+  function bukaGambar(files){
+    return files.map(function(f){ return { w:1280, h:720, build:async function(){
+      var im=new Image(); im.src=URL.createObjectURL(f); await im.decode();
+      this.w=1280; this.h=Math.round(1280*im.naturalHeight/im.naturalWidth);
+      im.style.cssText='width:'+this.w+'px;height:'+this.h+'px;display:block'; return im; } }; });
+  }
+
+  /* ---------- Penampil ---------- */
+  var slides=[], cur=0, token=0, wrap=$('wrap'), pesan=$('pesan');
+  function info(t,err){ pesan.textContent=t; pesan.className=err?'err':''; }
+  async function tampil(i){
+    if(!slides.length) return; i=Math.max(0,Math.min(slides.length-1,i)); cur=i;
+    var my=++token, s=slides[i];
+    $('hal').textContent=(i+1)+' / '+slides.length; $('prog').style.width=((i+1)/slides.length*100)+'%';
+    try{ if(!s.node) s.node=await s.build(); }catch(e){ s.node=document.createElement('div'); s.node.textContent='Slide ini gagal ditampilkan.'; s.w=640; s.h=360; s.node.style.cssText='width:640px;height:360px;color:#c4455f;padding:20px'; }
+    if(my!==token) return;
+    wrap.replaceChildren(s.node); muat();
+    var nx=slides[i+1]; if(nx&&!nx.node) nx.build().then(function(n){ nx.node=n; }).catch(function(){});
+  }
+  function muat(){
+    var s=slides[cur]; if(!s||!s.node) return;
+    var k=Math.min($('stage').clientWidth/s.w,$('stage').clientHeight/s.h);
+    wrap.style.width=s.w*k+'px'; wrap.style.height=s.h*k+'px'; s.node.style.transform='scale('+k+')';
+  }
+  async function proses(files){
+    var a=Array.prototype.slice.call(files); if(!a.length) return;
+    var n=a[0].name.toLowerCase(); info('Sedang memuat berkas...');
+    try{
+      if(/\.(ppt|odp|key)$/.test(n)) throw new Error('Format ini belum didukung. Simpan ulang sebagai .pptx atau PDF.');
+      if(n.endsWith('.pptx')) slides=await bukaPptx(await a[0].arrayBuffer());
+      else if(n.endsWith('.pdf')) slides=await bukaPdf(await a[0].arrayBuffer());
+      else if(a[0].type.indexOf('image/')===0) slides=bukaGambar(a.filter(function(f){ return f.type.indexOf('image/')===0; }).sort(function(x,y){ return x.name.localeCompare(y.name,undefined,{numeric:true}); }));
+      else throw new Error('Format berkas tidak dikenali. Gunakan PPTX, PDF, atau gambar.');
+      if(!slides.length) throw new Error('Tidak ada slide yang ditemukan di berkas ini.');
+      info(''); $('awal').hidden=true; $('viewer').hidden=false; tampil(0); jagaBar();
+    }catch(e){ info(e.message||'Berkas tidak bisa dibuka.',true); slides=[]; }
+  }
+
+  var drop=$('drop'), input=$('berkas');
+  $('pilih').addEventListener('click',function(){ input.click(); });
+  $('pilih').addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); input.click(); } });
+  input.addEventListener('change',function(){ proses(input.files); input.value=''; });
+  ['dragenter','dragover'].forEach(function(t){ addEventListener(t,function(e){ e.preventDefault(); drop.classList.add('on'); }); });
+  ['dragleave','drop'].forEach(function(t){ addEventListener(t,function(e){ e.preventDefault(); drop.classList.remove('on'); }); });
+  addEventListener('drop',function(e){ if(!$('awal').hidden) proses(e.dataTransfer.files); });
+
+  $('next').onclick=function(){ tampil(cur+1); };
+  $('prev').onclick=function(){ tampil(cur-1); };
+  $('penuh').onclick=function(){ if(document.fullscreenElement) document.exitFullscreen(); else $('viewer').requestFullscreen&&$('viewer').requestFullscreen(); };
+  $('tutup').onclick=function(){ if(document.fullscreenElement) document.exitFullscreen(); $('viewer').hidden=true; $('awal').hidden=false; slides=[]; wrap.replaceChildren(); };
+  addEventListener('keydown',function(e){
+    if($('viewer').hidden) return; var k=e.key;
+    if(['ArrowRight','PageDown',' ','Enter'].indexOf(k)>-1){ e.preventDefault(); tampil(cur+1); }
+    else if(['ArrowLeft','PageUp','Backspace'].indexOf(k)>-1){ e.preventDefault(); tampil(cur-1); }
+    else if(k==='Home') tampil(0); else if(k==='End') tampil(slides.length-1);
+    else if(k==='f'||k==='F') $('penuh').click();
+  });
+  $('stage').addEventListener('click',function(e){ tampil(e.clientX>innerWidth/2?cur+1:cur-1); });
+  var sx=0; addEventListener('touchstart',function(e){ sx=e.touches[0].clientX; },{passive:true});
+  addEventListener('touchend',function(e){ if($('viewer').hidden) return; var dx=e.changedTouches[0].clientX-sx; if(Math.abs(dx)>50) tampil(dx<0?cur+1:cur-1); },{passive:true});
+  addEventListener('resize',muat); document.addEventListener('fullscreenchange',muat);
+  var tm; function jagaBar(){ $('bar').classList.remove('sembunyi'); clearTimeout(tm); tm=setTimeout(function(){ $('bar').classList.add('sembunyi'); },2800); }
+  addEventListener('mousemove',function(){ if(!$('viewer').hidden) jagaBar(); });
+</script>
+</body>
+</html>
