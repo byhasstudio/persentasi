@@ -224,6 +224,11 @@
   function info(t,err){ pesan.textContent=t; pesan.className=err?'err':''; }
   var RM=matchMedia('(prefers-reduced-motion: reduce)').matches, EASE='cubic-bezier(.32,.72,0,1)';
   function anim(el,kf,ms,ease){ return RM?null:el.animate(kf,{duration:ms,easing:ease||EASE}); }
+  function isiAnim(n){
+    Array.prototype.forEach.call(n.children,function(c,i){
+      c.animate([{opacity:0,transform:c.tagName==='IMG'?'scale(.92)':'translateY(26px)'},{opacity:1,transform:'none'}],
+        {duration:760,delay:140+Math.min(i,10)*110,easing:EASE,fill:'backwards'}); });
+  }
   async function tampil(i,off){
     if(!slides.length) return;
     var baru=Math.max(0,Math.min(slides.length-1,i)), d=i>=cur?1:-1; off=off||0;
@@ -242,6 +247,7 @@
     if(my!==token){ if(keluar) keluar.cancel(); return; }
     wrap.replaceChildren(s.node); muat(); wrap.style.transform=''; if(keluar) keluar.cancel();
     anim(wrap,awal?[{opacity:0,transform:'scale(.94)'},{opacity:1,transform:'none'}]:[{opacity:0,transform:'translateX('+(d*70)+'px) scale(.96)'},{opacity:1,transform:'none'}],awal?560:500);
+    if(!RM&&s.node.classList&&s.node.classList.contains('slide')) isiAnim(s.node);
     var nx=slides[baru+1]; if(nx&&!nx.node) nx.build().then(function(n){ nx.node=n; }).catch(function(){});
   }
   function muat(){
